@@ -49,6 +49,16 @@ export const getConfig = () => {
     return {
       serverUrl: process.env.BBB_SERVER_URL || BBB_CONFIG.serverUrl,
       sharedSecret: process.env.BBB_SHARED_SECRET || BBB_CONFIG.sharedSecret,
+      defaultSettings: {
+        attendeePW: process.env.BBB_DEFAULT_ATTENDEE_PW || BBB_CONFIG.defaultSettings.attendeePW,
+        moderatorPW: process.env.BBB_DEFAULT_MODERATOR_PW || BBB_CONFIG.defaultSettings.moderatorPW,
+        welcome: BBB_CONFIG.defaultSettings.welcome,
+        record: BBB_CONFIG.defaultSettings.record,
+        maxParticipants: BBB_CONFIG.defaultSettings.maxParticipants,
+        duration: BBB_CONFIG.defaultSettings.duration,
+        logoutURL: BBB_CONFIG.defaultSettings.logoutURL,
+      },
+      roomTypes: BBB_CONFIG.roomTypes
     };
   }
   

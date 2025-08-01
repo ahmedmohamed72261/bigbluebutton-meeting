@@ -20,10 +20,45 @@ export async function POST(request) {
     const isRunning = await bbb.isMeetingRunning(meetingID);
     
     if (!isRunning.running) {
-      return NextResponse.json(
-        { error: 'Meeting is not currently running' },
-        { status: 404 }
-      );
+      // If meeting doesn't exist and user is trying to join as moderator, create it
+      if (role === 'moderator') {
+        try {
+          const meetingOptions = {
+            attendeePW: config.defaultSettings.attendeePW,
+            moderatorPW: config.defaultSettings.moderatorPW,
+            welcome: `Welcome to ${meetingID}!`,
+            record: 'false',
+            maxParticipants: 50,
+            duration: 120,
+            logoutURL: config.defaultSettings.logoutURL,
+            meta: {
+              'meta_createdBy': fullName,
+              'meta_createdAt': new Date().toISOString(),
+              'meta_autoCreated': 'true'
+            }
+          };
+
+          const createResult = await bbb.createMeeting(meetingID, meetingID, meetingOptions);
+          
+          if (createResult.returncode !== 'SUCCESS') {
+            return NextResponse.json(
+              { error: 'Failed to create meeting automatically' },
+              { status: 500 }
+            );
+          }
+        } catch (createError) {
+          console.error('Error auto-creating meeting:', createError);
+          return NextResponse.json(
+            { error: 'Failed to create meeting automatically' },
+            { status: 500 }
+          );
+        }
+      } else {
+        return NextResponse.json(
+          { error: 'Meeting is not currently running. Please ask the moderator to start the meeting first.' },
+          { status: 404 }
+        );
+      }
     }
 
     // Determine password based on role
@@ -40,7 +75,9 @@ export async function POST(request) {
       meetingID,
       fullName,
       role,
-      message: 'Join URL generated successfully'
+      message: role === 'moderator' && !isRunning.running 
+        ? 'Meeting created and join URL generated successfully'
+        : 'Join URL generated successfully'
     });
 
   } catch (error) {
