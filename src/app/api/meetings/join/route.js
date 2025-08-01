@@ -13,20 +13,51 @@ export async function POST(request) {
       );
     }
 
+    console.log(`Join request: ${fullName} (${role}) wants to join meeting: ${meetingID}`);
+
     const config = getConfig();
     const bbb = new BigBlueButtonAPI(config.serverUrl, config.sharedSecret);
 
-    // Check if meeting is running
-    const isRunning = await bbb.isMeetingRunning(meetingID);
-    
-    if (!isRunning.running) {
-      // If meeting doesn't exist and user is trying to join as moderator, create it
+    // Check if meeting exists and is running
+    let meetingExists = false;
+    let meetingRunning = false;
+
+    try {
+      // First check if meeting is running
+      const runningCheck = await bbb.isMeetingRunning(meetingID);
+      meetingRunning = runningCheck.running === true;
+      console.log(`Meeting ${meetingID} running status: ${meetingRunning}`);
+
+      if (meetingRunning) {
+        meetingExists = true;
+      } else {
+        // If not running, try to get meeting info to see if it exists but not started
+        try {
+          const meetingInfo = await bbb.getMeetingInfo(meetingID, config.defaultSettings.moderatorPW);
+          meetingExists = meetingInfo.returncode === 'SUCCESS';
+          console.log(`Meeting ${meetingID} exists but not running: ${meetingExists}`);
+        } catch (infoError) {
+          console.log(`Meeting info check failed: ${infoError.message}`);
+          meetingExists = false;
+        }
+      }
+    } catch (error) {
+      console.log(`Error checking meeting status: ${error.message}`);
+      meetingExists = false;
+      meetingRunning = false;
+    }
+
+    // Handle different scenarios
+    if (!meetingExists && !meetingRunning) {
       if (role === 'moderator') {
+        // Moderator can create a new meeting
+        console.log(`Creating new meeting: ${meetingID} for moderator: ${fullName}`);
+        
         try {
           const meetingOptions = {
             attendeePW: config.defaultSettings.attendeePW,
             moderatorPW: config.defaultSettings.moderatorPW,
-            welcome: `Welcome to ${meetingID}!`,
+            welcome: `Welcome to ${meetingID}! This meeting was started by ${fullName}.`,
             record: 'false',
             maxParticipants: 50,
             duration: 120,
@@ -38,36 +69,61 @@ export async function POST(request) {
             }
           };
 
-          const createResult = await bbb.createMeeting(meetingID, meetingID, meetingOptions);
+          const createResult = await bbb.createMeeting(meetingID, `Meeting ${meetingID}`, meetingOptions);
           
           if (createResult.returncode !== 'SUCCESS') {
+            console.error('Failed to create meeting:', createResult);
             return NextResponse.json(
-              { error: 'Failed to create meeting automatically' },
+              { error: `Failed to create meeting: ${createResult.message || 'Unknown error'}` },
               { status: 500 }
             );
           }
+          
+          console.log(`Meeting created successfully: ${meetingID}`);
+          meetingExists = true;
+          meetingRunning = true;
         } catch (createError) {
-          console.error('Error auto-creating meeting:', createError);
+          console.error('Error creating meeting:', createError);
           return NextResponse.json(
-            { error: 'Failed to create meeting automatically' },
+            { error: `Failed to create meeting: ${createError.message}` },
             { status: 500 }
           );
         }
       } else {
+        // Attendee cannot join non-existent meeting
         return NextResponse.json(
-          { error: 'Meeting is not currently running. Please ask the moderator to start the meeting first.' },
+          { 
+            error: `Meeting "${meetingID}" does not exist or is not running. Please check the Meeting ID or ask the moderator to start the meeting first.` 
+          },
+          { status: 404 }
+        );
+      }
+    } else if (meetingExists && !meetingRunning) {
+      // Meeting exists but not running - only moderator can start it
+      if (role !== 'moderator') {
+        return NextResponse.json(
+          { 
+            error: `Meeting "${meetingID}" exists but is not currently running. Please ask the moderator to start the meeting first.` 
+          },
           { status: 404 }
         );
       }
     }
 
-    // Determine password based on role
+    // At this point, meeting should exist and be running (or about to be started by moderator)
+    console.log(`Proceeding to join meeting: ${meetingID} as ${role}`);
+
+    // Determine password based on role - this is crucial for joining the correct meeting
     const password = role === 'moderator' 
       ? config.defaultSettings.moderatorPW 
       : config.defaultSettings.attendeePW;
 
-    // Generate join URL
+    console.log(`Using password for ${role}: ${password}`);
+
+    // Generate join URL with minimal additional parameters to avoid conflicts
     const joinUrl = bbb.generateJoinUrl(meetingID, fullName, password);
+
+    console.log(`Generated join URL for ${fullName} (${role}) to meeting ${meetingID}`);
 
     return NextResponse.json({
       success: true,
@@ -75,15 +131,17 @@ export async function POST(request) {
       meetingID,
       fullName,
       role,
-      message: role === 'moderator' && !isRunning.running 
-        ? 'Meeting created and join URL generated successfully'
-        : 'Join URL generated successfully'
+      meetingExists,
+      meetingRunning,
+      message: role === 'attendee' 
+        ? `Ready to join meeting "${meetingID}" as attendee. You will join the same meeting as the moderator.`
+        : `Ready to join meeting "${meetingID}" as moderator.`
     });
 
   } catch (error) {
-    console.error('Error joining meeting:', error);
+    console.error('Error in join meeting:', error);
     return NextResponse.json(
-      { error: error.message || 'Failed to join meeting' },
+      { error: `Failed to join meeting: ${error.message}` },
       { status: 500 }
     );
   }
